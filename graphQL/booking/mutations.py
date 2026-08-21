@@ -6,8 +6,11 @@ import strawberry
 from graphQL.booking.inputs import BookingInput, BookingUpdate
 from graphQL.booking.types import Booking
 
+
+from data.models.user import User as UserModel
+from data.models.room import Room as RoomModel
 from data.models.booking import Booking as BookingModel
-from data.crud import crud_booking
+from data.crud import crud_booking, crud_user, crud_room
 
 from taskiq_redis.schedule_source import RedisScheduleSource
 
@@ -16,19 +19,22 @@ from utils.planning.taskiq import send_email_confirmation, cancel_reservation, s
 import uuid
 from taskiq import ScheduledTask
 
+
 @strawberry.type
 class BookingMutation:
 
     @staticmethod
-    async def plan_booking(booking: BookingInput):
+    async def plan_booking(booking: BookingModel, user: UserModel, room: RoomModel):
         # J'ajoute le planning
         run_confirmation = booking.start_time - timedelta(minutes=30)
+        limite_confirmation = str(booking.start_time - timedelta(minutes=15))
         await schedule_source.add_schedule(
             ScheduledTask(
                 schedule_id=str(uuid.uuid4()),
                 task_name=send_email_confirmation.task_name,
                 labels={},
-                args=[booking.room_id, booking.start_time],
+                args=[user.email, user.pseudo, limite_confirmation, room.name, str(
+                    booking.start_time.date()), str(booking.start_time.time()), str(booking.end_time.time())],
                 kwargs=[],
                 time=run_confirmation
             )
@@ -60,10 +66,10 @@ class BookingMutation:
             )
 
         # Je vérifie si la place n'est pas prise
-        booked = try_to_book(booking.room_id, booking.start_time, booking.end_time)
-        if not booked:
+        booked = await try_to_book(booking.room_id, booking.start_time, booking.end_time)
+        if booked is not "OK":
             raise GraphQLError(
-                message="La plage horaire n'est pas encore disponible.",
+                message=booked,
                 extensions={
                     "code": 400,
                     "timestamp": datetime.now().isoformat()
@@ -81,7 +87,10 @@ class BookingMutation:
             session=session
         )
 
-        await BookingMutation.plan_booking(booking)
+        db_user = await crud_user.get_user_by_id(booking.user_id)
+        db_room = await crud_room.get_room_by_id(booking.room_id)
+
+        await BookingMutation.plan_booking(db_booking, db_user, db_room)
 
         return Booking(
             id=db_booking.id,
