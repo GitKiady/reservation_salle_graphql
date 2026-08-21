@@ -33,3 +33,7 @@ async def try_to_book(room_id: int, start: datetime, end: datetime) -> bool:
 
 async def get_booking(room_id: int) -> dict:
     return await r.get(cle_booking(room_id))
+
+
+async def del_booking(room_id: int) -> bool:
+    return await r.delete(cle_booking(room_id))

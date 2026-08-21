@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from graphql import GraphQLError
 import strawberry
@@ -9,12 +9,43 @@ from graphQL.booking.types import Booking
 from data.models.booking import Booking as BookingModel
 from data.crud import crud_booking
 
-from utils.cache.redis import try_to_book
-from utils.planning.taskiq import send_email_confirmation
+from taskiq_redis.schedule_source import RedisScheduleSource
 
+from utils.cache.redis import try_to_book
+from utils.planning.taskiq import send_email_confirmation, cancel_reservation, schedule_source
+import uuid
+from taskiq import ScheduledTask
 
 @strawberry.type
 class BookingMutation:
+
+    @staticmethod
+    async def plan_booking(booking: BookingInput):
+        # J'ajoute le planning
+        run_confirmation = booking.start_time - timedelta(minutes=30)
+        await schedule_source.add_schedule(
+            ScheduledTask(
+                schedule_id=str(uuid.uuid4()),
+                task_name=send_email_confirmation.task_name,
+                labels={},
+                args=[booking.room_id, booking.start_time],
+                kwargs=[],
+                time=run_confirmation
+            )
+        )
+
+        # J'ajoute la vérification si le booking n'a pas été accepté
+        run_cancel = booking.start_time - timedelta(minutes=10)
+        await schedule_source.add_schedule(
+            ScheduledTask(
+                schedule_id=str(uuid.uuid4()),
+                task_name=cancel_reservation.task_name,
+                labels={},
+                args=[booking.room_id, booking.start_time],
+                kwargs=[],
+                time=run_cancel
+            )
+        )
 
     @strawberry.mutation
     async def createBooking(self, booking: BookingInput, info: strawberry.Info) -> Booking:
@@ -27,10 +58,6 @@ class BookingMutation:
                     "timestamp": datetime.now().isoformat()
                 }
             )
-
-        # C'est ici qu'on ajoute la gestion de disponibilité de la salle
-        # ...
-        #
 
         # Je vérifie si la place n'est pas prise
         booked = try_to_book(booking.room_id, booking.start_time, booking.end_time)
@@ -54,8 +81,7 @@ class BookingMutation:
             session=session
         )
 
-        # J'ajoute le planning
-
+        await BookingMutation.plan_booking(booking)
 
         return Booking(
             id=db_booking.id,
