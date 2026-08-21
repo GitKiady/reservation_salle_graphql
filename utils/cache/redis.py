@@ -19,19 +19,19 @@ for i = 1, #reservation - 1, 2 do
     local start = tonumber(reservation[i])
     local finish = tonumber(reservation[i+1])
 
-    if start == start_bk and end == end_bk then
+    if start == start_bk and finish == end_bk then
         return "Créneau déjà réservé."
     end
-    if start < start_bk and start_bk < end_bk or  then
+    if start < start_bk and start_bk < end_bk then
         return "La date de début est en conflit avec d'autre réservations."
     end
     if start < end_bk and end_bk < finish then
         return "La date de fin est en conflit avec d'autre réservations."
     end
-    if start == start_bk and end <= end_bk then
+    if start == start_bk and finish <= end_bk then
         return "La date de début est en conflit avec d'autre réservations."
     end
-    if start <= start_bk and end == end_bk then
+    if start <= start_bk and finish == end_bk then
         return "La date de fin est en conflit avec d'autre réservations."
     end
 end
@@ -50,7 +50,7 @@ def cle_booking(room_id: int) -> str:
 
 async def try_to_book(room_id: int, start: datetime, end: datetime) -> str:
     return await attemp_booking(
-        keys=[cle_booking(room_id, start)],
+        keys=[cle_booking(room_id)],
         args=[start.timestamp(), end.timestamp()]
     )
 

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime, time
+import locale
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -12,6 +13,40 @@ SMTP_SERVER = os.getenv("SMTP_SERVER")
 SMTP_PORT = int(os.getenv("SMTP_PORT"))
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+
+
+try:
+    locale.setlocale(locale.LC_ALL, 'french')
+except locale.Error:
+    locale.setlocale(locale.LC_TIME, '')
+
+
+# Les paramètres venant d'un schedule_by_time est en str donc il faut le formater
+from datetime import datetime, date
+
+def format_date(dt) -> str:
+    # If it's already a datetime or date object
+    if isinstance(dt, (datetime, date)):
+        return dt.strftime("%A %d %B %Y")
+    
+    # If it's a string, try parsing it
+    if isinstance(dt, str):
+        try:
+            parsed_dt = datetime.strptime(dt, "%Y-%m-%d")
+            return parsed_dt.strftime("%A %d %B %Y")
+        except ValueError:
+            return dt  # Return as-is if string is in a different format
+            
+    return str(dt)
+
+
+def format_time(time: datetime | str):
+    if isinstance(time, str):
+        parts = time.split(":")
+        if len(parts) >= 2:
+            return f"{parts[0]}:{parts[1]}"
+    
+    return time.strftime("%H:%M")
 
 
 HEAD_CONTENT = """
@@ -139,7 +174,7 @@ HEAD_CONTENT = """
 """
 
 
-async def send_email(receiver: str, destinataire: str, date_limite: str, salle: str, date_res: str, heure_debut: str, heure_fin: str):
+async def send_email(receiver: str, destinataire: str, date_limite: datetime, salle: str, date_res: datetime, heure_debut: datetime, heure_fin: datetime) -> str:
     message = MIMEMultipart("alternative")
     message["Subject"] = "Rappel de confirmation: Réservation salle."
     message["FROM"] = EMAIL_SENDER
@@ -163,7 +198,7 @@ async def send_email(receiver: str, destinataire: str, date_limite: str, salle: 
 
             <!-- Avertissement Annulation -->
             <div class="alert-box">
-                <strong>Attention :</strong> Veuillez confirmer votre présence avant le <strong>{date_limite}</strong>. Passé ce délai, votre réservation sera <strong>automatiquement annulée</strong> et la salle sera remise à disposition.
+                <strong>Attention :</strong> Veuillez confirmer votre présence avant le <strong>{format_date(date_limite)} à {format_time(date_limite)}</strong>. Passé ce délai, votre réservation sera <strong>automatiquement annulée</strong> et la salle sera remise à disposition.
             </div>
 
             <!-- Récapitulatif -->
@@ -177,15 +212,15 @@ async def send_email(receiver: str, destinataire: str, date_limite: str, salle: 
                     </tr>
                     <tr>
                         <td style="padding: 6px 0; font-weight: 600; color: #334155;">Salle :</td>
-                        <td style="padding: 6px 0; color: #0f172a;"><strong>{salle}</strong> (Étage [X])</td>
+                        <td style="padding: 6px 0; color: #0f172a;"><strong>{salle}</strong> </td>
                     </tr>
                     <tr>
                         <td style="padding: 6px 0; font-weight: 600; color: #334155;">Date :</td>
-                        <td style="padding: 6px 0; color: #0f172a;">{date_res}</td>
+                        <td style="padding: 6px 0; color: #0f172a;">{format_date(date_res)}</td>
                     </tr>
                     <tr>
                         <td style="padding: 6px 0; font-weight: 600; color: #334155;">Horaire :</td>
-                        <td style="padding: 6px 0; color: #0f172a;">De {heure_debut} à {heure_fin}</td>
+                        <td style="padding: 6px 0; color: #0f172a;">De {format_time(heure_debut)} à {format_time(heure_fin)}</td>
                     </tr>
                 </table>
             </div>
@@ -205,7 +240,7 @@ async def send_email(receiver: str, destinataire: str, date_limite: str, salle: 
         <!-- Pied de page -->
         <div class="footer">
             <p style="margin: 0 0 8px 0;">Cet email a été envoyé automatiquement par le système de gestion des salles.</p>
-            <p style="margin: 0;">© {datetime.year} — Tous droits réservés.</p>
+            <p style="margin: 0;">© {datetime.now().year} — Tous droits réservés.</p>
         </div>
     </div>
 </body>
@@ -220,6 +255,4 @@ async def send_email(receiver: str, destinataire: str, date_limite: str, salle: 
             server.sendmail(EMAIL_SENDER, receiver, message.as_string())
         return "OK"
     except Exception as e:
-        return e
-
-
+        return str(e)

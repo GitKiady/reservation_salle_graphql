@@ -47,7 +47,7 @@ class UserMutation:
     async def login(self, user: LoginInput, info: strawberry.Info) -> AuthPayload:
         session = info.context.session
         db_user = await crud_user.get_user_valid_by_email(user.email, session)
-        if not db_user or not check_password(user.password, db_user[0].hashed_password):
+        if not db_user or not check_password(user.password, db_user.hashed_password):
             raise GraphQLError(
                 message="Identification invalide.",
                 extensions={
@@ -60,9 +60,9 @@ class UserMutation:
         return AuthPayload(
             token=token,
             user=User(
-                id=db_user[0].id,
-                pseudo=db_user[0].pseudo,
-                email=db_user[0].email
+                id=db_user.id,
+                pseudo=db_user.pseudo,
+                email=db_user.email
             )
         )
 

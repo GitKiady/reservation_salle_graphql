@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from graphql import GraphQLError
 import strawberry
@@ -6,6 +6,7 @@ import strawberry
 from graphQL.booking.inputs import BookingInput, BookingUpdate
 from graphQL.booking.types import Booking
 
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from data.models.user import User as UserModel
 from data.models.room import Room as RoomModel
@@ -19,39 +20,53 @@ from utils.planning.taskiq import send_email_confirmation, cancel_reservation, s
 import uuid
 from taskiq import ScheduledTask
 
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 
 @strawberry.type
 class BookingMutation:
 
     @staticmethod
-    async def plan_booking(booking: BookingModel, user: UserModel, room: RoomModel):
-        # J'ajoute le planning
-        run_confirmation = booking.start_time - timedelta(minutes=30)
-        limite_confirmation = str(booking.start_time - timedelta(minutes=15))
-        await schedule_source.add_schedule(
-            ScheduledTask(
-                schedule_id=str(uuid.uuid4()),
-                task_name=send_email_confirmation.task_name,
-                labels={},
-                args=[user.email, user.pseudo, limite_confirmation, room.name, str(
-                    booking.start_time.date()), str(booking.start_time.time()), str(booking.end_time.time())],
-                kwargs=[],
-                time=run_confirmation
-            )
+    async def plan_booking(
+        booking: BookingModel,
+        user: UserModel,
+        room: RoomModel
+    ):
+        # 1. Calcul des heures d'exécution au format UTC conscient (Aware UTC)
+        now_utc = datetime.now(timezone.utc)
+        
+        run_confirmation = (
+            booking.start_time - timedelta(minutes=int(os.getenv("MINUTE_CONFIRMATION", 30)))
+        ).astimezone(timezone.utc)
+        
+        limite_confirmation = (
+            booking.start_time - timedelta(minutes=int(os.getenv("MINUTE_CANCEL", 15)))
+        ).astimezone(timezone.utc) # On utilise utc car le planificateur redis utilise utc. Dans le cas contraire, il y aurait un décalage
+        
+        run_cancel = limite_confirmation + timedelta(minutes=1)
+
+        # 2. Planification de l'email
+        await send_email_confirmation.schedule_by_time(
+            schedule_source,
+            time=run_confirmation,
+            receiver=user.email,
+            destinataire=user.pseudo,
+            date_limite=booking.start_time - timedelta(minutes=int(os.getenv("MINUTE_CANCEL", 15))),
+            salle=room.name,
+            date_res=booking.start_time.date(),
+            heure_debut=booking.start_time.time(),
+            heure_fin=booking.end_time.time(),
         )
 
-        # J'ajoute la vérification si le booking n'a pas été accepté
-        run_cancel = booking.start_time - timedelta(minutes=10)
-        await schedule_source.add_schedule(
-            ScheduledTask(
-                schedule_id=str(uuid.uuid4()),
-                task_name=cancel_reservation.task_name,
-                labels={},
-                args=[booking.room_id, booking.start_time],
-                kwargs=[],
-                time=run_cancel
-            )
+        # 3. Planification de l'annulation automatique
+        await cancel_reservation.schedule_by_time(
+            schedule_source,
+            time=run_cancel,
+            booking_id=booking.id,
         )
+
 
     @strawberry.mutation
     async def createBooking(self, booking: BookingInput, info: strawberry.Info) -> Booking:
@@ -65,9 +80,18 @@ class BookingMutation:
                 }
             )
 
+        if booking.start_time < datetime.now() or booking.end_time < datetime.now() or booking.start_time > booking.end_time:
+            raise GraphQLError(
+                message="Date de réservation invalide.",
+                extensions={
+                    "code": 400,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )  
+
         # Je vérifie si la place n'est pas prise
         booked = await try_to_book(booking.room_id, booking.start_time, booking.end_time)
-        if booked is not "OK":
+        if booked != "OK":
             raise GraphQLError(
                 message=booked,
                 extensions={
@@ -87,8 +111,8 @@ class BookingMutation:
             session=session
         )
 
-        db_user = await crud_user.get_user_by_id(booking.user_id)
-        db_room = await crud_room.get_room_by_id(booking.room_id)
+        db_user = await crud_user.get_user_by_id(booking.user_id, session)
+        db_room = await crud_room.get_room_by_id(booking.room_id, session)
 
         await BookingMutation.plan_booking(db_booking, db_user, db_room)
 
