@@ -5,10 +5,11 @@ load_dotenv()
 
 class Redis(redis.asyncio.Redis):
     def __init__(self):
-        super.__init__(
+        super().__init__(
             host=os.getenv("REDIS_HOST"),
             port=int(os.getenv("REDIS_PORT")),
-            decode_responses=True
+            decode_responses=True,
+            max_connections=10
         )
 
     def get_host(self):

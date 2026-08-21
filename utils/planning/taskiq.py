@@ -1,9 +1,16 @@
 from datetime import datetime
 
-from taskiq_redis import RedisAsyncResultBackend, RedisStreamBroker, ListRedisScheduleSource
-from taskiq import TaskiqScheduler
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from taskiq_redis import RedisAsyncResultBackend, RedisStreamBroker, ListRedisScheduleSource
+from taskiq import TaskiqDepends, TaskiqScheduler
+
+from data.models.booking import STATUS, Booking as BookingModel
 from utils.cache.redis_config import Redis
+from utils.cache.redis import del_booking
+from utils.mailing.mail import send_email
+
+from data.database.connexion import get_session
 
 redis = Redis()
 
@@ -17,20 +24,58 @@ broker = RedisStreamBroker(
 ).with_result_backend(result_backend)
 
 # C'est celui qui enqueue le job
-schedule_source = ListRedisScheduleSource(url=f"{redis.get_url()}/1") # Différent database
+schedule_source = ListRedisScheduleSource(
+    url=redis.get_url())  # Différent database
 
 # Appeler par la commande: taskiq scheduler utils.planning.taskiq:scheduler
-scheduler = TaskiqScheduler(broker, sources=[schedule_source]) 
+scheduler = TaskiqScheduler(broker, sources=[schedule_source])
+
+# Commande pour appeler taskiq:
+# taskiq worker utils.planning.taskiq:broker
+# taskiq scheduler utils.planning.taskiq:scheduler
 
 
 @broker.task
-async def send_email_confirmation(room_id: int, start: datetime):
-    # Envoie email 30 mins avant start date
-    ...
+async def send_email_confirmation(receiver: str, destinataire: str, date_limite: datetime, salle: str, date_res: datetime, heure_debut: datetime, heure_fin: datetime):
+    """
+        Envoie email 30 mins avant start date
+    """
+    result = await send_email(receiver, destinataire, date_limite,
+                              salle, date_res, heure_debut, heure_fin)
+
 
 @broker.task
-async def cancel_reservation(room_id: int):
-    # vérifie si booking n'a pas été confirmé mais toujours en pending
-    # si non, return none
-    # Modifie booking en cancel et supprimer la clé dans redis
+async def cancel_reservation(
+    booking_id: int,
+    session: AsyncSession = TaskiqDepends(get_session)
+) -> bool:
+    """
+        Vérifie si booking n'a pas été confirmé mais toujours en pending
+        si non, return none
+        Modifie booking en cancel et supprimer la clé dans redis
+    """
+
+    booking = await session.get(BookingModel, booking_id)
+    if not booking:
+        return False
+
+    if booking.status is not STATUS.CONFIRMER:
+        booking.status = STATUS.CANCELLED
+        try:
+            session.add(booking)
+            await session.commit()
+            
+            await del_booking(booking.room_id, booking.start_time, booking.end_time)
+            return True
+        except Exception:
+            await session.rollback()
+            raise
+    return False
+
+
+@broker.task
+async def remove_obs_keys(room_id: int):
+    """
+        S'execute chaque semains pour nettoyer les clées reservations obselètes
+    """
     ...
