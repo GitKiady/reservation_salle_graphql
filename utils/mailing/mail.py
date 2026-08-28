@@ -256,3 +256,80 @@ async def send_email(receiver: str, destinataire: str, date_limite: datetime, sa
         return "OK"
     except Exception as e:
         return str(e)
+
+
+async def send_email_cancel(receiver: str, destinataire: str, salle: str, date_res: datetime, heure_debut: datetime, heure_fin: datetime) -> str:
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Annulation de votre réservation de salle"
+    message["FROM"] = EMAIL_SENDER
+    message["TO"] = receiver
+
+    BODY_CONTENT = HEAD_CONTENT + f"""
+<body>
+    <div class="container">
+        <!-- En-tête -->
+        <div class="header">
+            <h1>Annulation de votre réservation</h1>
+        </div>
+
+        <!-- Corps du message -->
+        <div class="content">
+            <div class="greeting">Bonjour {destinataire},</div>
+            
+            <p class="intro">
+                Votre pré-réservation n'ayant pas été confirmée dans les délais impartis, nous vous informons que celle-ci a été <strong>annulée</strong>.
+            </p>
+
+            <!-- Notification Annulation -->
+            <div class="alert-box" style="background-color: #fef2f2; border-left: 4px solid #ef4444; color: #991b1b; padding: 12px 16px; margin: 20px 0; border-radius: 4px;">
+                <strong>Information :</strong> La salle <strong>{salle}</strong> a été remise à disposition pour d'autres utilisateurs.
+            </div>
+
+            <!-- Récapitulatif -->
+            <div class="details-box">
+                <div class="details-title">Détails de la réservation annulée</div>
+                
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 6px 0; font-weight: 600; color: #334155; width: 40%;">Statut :</td>
+                        <td style="padding: 6px 0;"><span class="badge-cancelled" style="background-color: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 12px;">Non confirmée — Annulée</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; font-weight: 600; color: #334155;">Salle :</td>
+                        <td style="padding: 6px 0; color: #0f172a;"><strong>{salle}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; font-weight: 600; color: #334155;">Date :</td>
+                        <td style="padding: 6px 0; color: #0f172a;">{format_date(date_res)}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px 0; font-weight: 600; color: #334155;">Horaire :</td>
+                        <td style="padding: 6px 0; color: #0f172a;">De {format_time(heure_debut)} à {format_time(heure_fin)}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <p class="intro" style="margin-top: 20px;">
+                Si vous souhaitez effectuer une nouvelle réservation, n'hésitez pas à effectuer une nouvelle demande sur notre plateforme.
+            </p>
+        </div>
+
+        <!-- Pied de page -->
+        <div class="footer">
+            <p style="margin: 0 0 8px 0;">Cet email a été envoyé automatiquement par le système de gestion des salles.</p>
+            <p style="margin: 0;">© {datetime.now().year} — Tous droits réservés.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+    message.attach(MIMEText(BODY_CONTENT, "html"))
+
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()  # Sécurisation de la connexion via TLS
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, receiver, message.as_string())
+        return "OK"
+    except Exception as e:
+        return str(e)
