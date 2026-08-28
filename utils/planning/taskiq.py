@@ -8,7 +8,7 @@ from taskiq import TaskiqDepends, TaskiqScheduler
 from data.models.booking import STATUS, Booking as BookingModel
 from utils.cache.redis_config import Redis
 from utils.cache.redis import del_booking
-from utils.mailing.mail import send_email
+from utils.mailing.mail import send_email, send_email_cancel
 
 from data.database.connexion import get_session
 
@@ -46,6 +46,7 @@ async def send_email_confirmation(receiver: str, destinataire: str, date_limite:
 
 @broker.task
 async def cancel_reservation(
+    receiver: str, destinataire: str, date_limite: datetime, salle: str, date_res: datetime, heure_debut: datetime, heure_fin: datetime,
     booking_id: int,
     session: AsyncSession = TaskiqDepends(get_session)
 ) -> bool:
@@ -64,18 +65,14 @@ async def cancel_reservation(
         try:
             session.add(booking)
             await session.commit()
-            
+
             await del_booking(booking.room_id, booking.start_time, booking.end_time)
+
+            await send_email_cancel(receiver, destinataire, date_limite,
+                                    salle, date_res, heure_debut, heure_fin)
+
             return True
         except Exception:
             await session.rollback()
             raise
     return False
-
-
-@broker.task
-async def remove_obs_keys(room_id: int):
-    """
-        S'execute chaque semains pour nettoyer les clées reservations obselètes
-    """
-    ...
